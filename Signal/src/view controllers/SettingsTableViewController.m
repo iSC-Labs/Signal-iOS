@@ -193,7 +193,7 @@ typedef enum {
 
 - (void)proceedToUnregistration{
     [TSAccountManager unregisterTextSecureWithSuccess:^{
-        [PushManager.sharedManager requestPushTokenWithSuccess:^(NSData* pushToken){
+        [PushManager.sharedManager requestPushTokenWithSuccess:^(NSData* pushToken, NSData *voipToken){
             [[RPServerRequestsManager sharedInstance]performRequest:[RPAPICall unregisterWithPushToken:pushToken] success:^(NSURLSessionDataTask *task, id responseObject) {
                 [Environment resetAppData];
                 exit(0);

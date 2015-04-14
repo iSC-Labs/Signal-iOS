@@ -5,9 +5,8 @@
 #import "DebugLogger.h"
 #import "DiscardingLog.h"
 #import "Environment.h"
-#import "InCallViewController.h"
+#import "PhoneNumberDirectoryFilterManager.h"
 #import "PreferencesUtil.h"
-#import "NotificationTracker.h"
 #import "PushManager.h"
 #import "PriorityQueue.h"
 #import "Release.h"
@@ -29,9 +28,6 @@
 @interface AppDelegate ()
 
 @property (nonatomic, retain) UIWindow            *blankWindow;
-@property (nonatomic, strong) NotificationTracker *notificationTracker;
-
-@property (nonatomic) TOCFutureSource *callPickUpFuture;
 
 @end
 
@@ -68,11 +64,11 @@
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     [self setupAppearance];
     
+    [[PushManager sharedManager] registerPushKitNotificationFuture];
+    
     if (getenv("runningTests_dontStartApp")) {
         return YES;
     }
-    
-    self.notificationTracker = [NotificationTracker notificationTracker];
     
     CategorizingLogger* logger = [CategorizingLogger categorizingLogger];
     [logger addLoggingCallback:^(NSString *category, id details, NSUInteger index) {}];
@@ -172,86 +168,16 @@
     return NO;
 }
 
--(void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo {
-    if ([self isRedPhonePush:userInfo]) {
-        ResponderSessionDescriptor* call;
-        if (![self.notificationTracker shouldProcessNotification:userInfo]){
-            return;
-        }
-        
-        @try {
-            call = [ResponderSessionDescriptor responderSessionDescriptorFromEncryptedRemoteNotification:userInfo];
-            DDLogDebug(@"Received remote notification. Parsed session descriptor: %@.", call);
-            self.callPickUpFuture = [TOCFutureSource new];
-        } @catch (OperationFailed* ex) {
-            DDLogError(@"Error parsing remote notification. Error: %@.", ex);
-            return;
-        }
-        
-        if (!call) {
-            DDLogError(@"Decryption of session descriptor failed");
-            return;
-        }
-        
-        [Environment.phoneManager incomingCallWithSession:call];
-    }    
-}
-
-- (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo fetchCompletionHandler:(void (^)(UIBackgroundFetchResult))completionHandler {
-    
-    if ([self isRedPhonePush:userInfo]) {
-        [self application:application didReceiveRemoteNotification:userInfo];
-    } else {
-        [TSSocketManager becomeActive];
-    }
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC),
-                   dispatch_get_main_queue(), ^{
-                       completionHandler(UIBackgroundFetchResultNewData);
-                   });
-}
-
-- (BOOL)isRedPhonePush:(NSDictionary*)pushDict {
-    NSDictionary *aps  = [pushDict objectForKey:@"aps"];
-    NSString *category = [aps      objectForKey:@"category"];
-    
-    if ([category isEqualToString:Signal_Call_Category]) {
-        return YES;
-    } else{
-        return NO;
-    }
-}
-
 -(void) applicationDidBecomeActive:(UIApplication *)application {
     if ([TSAccountManager isRegistered]) {
         [TSSocketManager becomeActive];
     }
-    // Hacky way to clear notification center after processed push
-    [UIApplication.sharedApplication setApplicationIconBadgeNumber:1];
-    [UIApplication.sharedApplication setApplicationIconBadgeNumber:0];
     
     [self removeScreenProtection];
 }
 
 - (void)applicationWillResignActive:(UIApplication *)application{
     [self protectScreen];
-}
-
-- (void)application:(UIApplication *)application handleActionWithIdentifier:(NSString *)identifier forRemoteNotification:(NSDictionary *)userInfo completionHandler:(void (^)())completionHandler{
-    
-    [self application:application didReceiveRemoteNotification:userInfo];
-    if ([identifier isEqualToString:Signal_Call_Accept_Identifier]) {
-        [self.callPickUpFuture trySetResult:@YES];
-        completionHandler();
-    } else if ([identifier isEqualToString:Signal_Call_Decline_Identifier]){
-        [self.callPickUpFuture trySetResult:@NO];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
-                       dispatch_get_main_queue(), ^{
-                           completionHandler();
-                       });
-    } else{
-        completionHandler();
-    }
 }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application{
@@ -327,6 +253,18 @@
     Environment *env = [Environment getCurrent];
     PhoneNumberDirectoryFilterManager *manager = [env phoneDirectoryManager];
     [manager forceUpdate];
+}
+
+#pragma mark Push Notifications Delegate Methods
+
+- (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo {
+    [[PushManager sharedManager] application:application didReceiveRemoteNotification:userInfo];
+}
+- (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo fetchCompletionHandler:(void (^)(UIBackgroundFetchResult))completionHandler {
+    [[PushManager sharedManager] application:application didReceiveRemoteNotification:userInfo fetchCompletionHandler:completionHandler];
+}
+- (void)application:(UIApplication *)application handleActionWithIdentifier:(NSString *)identifier forLocalNotification:(UILocalNotification *)notification completionHandler:(void (^)())completionHandler {
+    [[PushManager sharedManager] application:application handleActionWithIdentifier:identifier forLocalNotification:notification completionHandler:completionHandler];
 }
 
 @end

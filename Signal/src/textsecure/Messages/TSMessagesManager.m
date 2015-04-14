@@ -400,6 +400,10 @@
 }
 
 - (void)notifyUserForIncomingMessage:(TSIncomingMessage*)message from:(NSString*)name {
+    UILocalNotification *notification = [[UILocalNotification alloc] init];
+    notification.alertBody = [NSString stringWithFormat:@"%@: %@",name, message.body];
+    notification.category  = Signal_Message_Category;
+    [[UIApplication sharedApplication] presentLocalNotificationNow:notification];
     AudioServicesPlayAlertSound(_newMessageSound);
 }
 
